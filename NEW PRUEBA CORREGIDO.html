@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comprobador de Canales IPTV</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 {
+            text-align: center;
+        }
+        #inputContainer {
+            margin-bottom: 15px;
+            width: 100%;
+            max-width: 800px;
+            display: flex;
+            gap: 10px;
+        }
+        input {
+            flex: 1;
+            padding: 8px;
+        }
+        button {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            color: white;
+        }
+        #scanButton { background-color: #4caf50; }
+        #stopButton { background-color: #f44336; display: none; }
+        #downloadButton { background-color: #1e88e5; display: none; }
+
+        #progressBarContainer {
+            width: 100%;
+            max-width: 800px;
+            height: 20px;
+            background-color: #eee;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        #progressBar {
+            height: 100%;
+            width: 0%;
+            background-color: #4caf50;
+            transition: width 0.2s;
+        }
+        #results {
+            margin-top: 20px;
+            width: 100%;
+            max-width: 800px;
+        }
+        .channel-status {
+            margin-bottom: 5px;
+            cursor: pointer;
+        }
+        .ok { color: #4caf50; }
+        .fail { color: #f44336; }
+        .error { color: #ff9800; }
+    </style>
+</head>
+
+<body>
+<h1>Comprobador de Canales IPTV</h1>
+
+<div id="inputContainer">
+    <input type="text" id="playlistUrl"
+           placeholder="https://iptv-org.github.io/iptv/index.m3u">
+    <button id="scanButton" onclick="startScan()">Escanear</button>
+    <button id="stopButton" onclick="stopScan()">Detener</button>
+    <button id="downloadButton" onclick="downloadPlaylist()">Descargar</button>
+</div>
+
+<div id="progressBarContainer">
+    <div id="progressBar"></div>
+</div>
+
+<div id="results"></div>
+
+<script>
+let stopFlag = false;
+let optimizedPlaylist = '';
+let totalChannels = 0;
+let checkedChannels = 0;
+
+async function checkChannel(url, timeout = 8000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+
+    try {
+        const response = await fetch(url, {
+            method: 'HEAD',
+            signal: controller.signal
+        });
+        clearTimeout(timer);
+
+        if ([200, 206, 302].includes(response.status)) {
+            return 'Disponible';
+        }
+        return 'No disponible';
+    } catch {
+        return 'Error';
+    }
+}
+
+async function scanChannels() {
+    const playlistUrl = document.getElementById('playlistUrl').value.trim();
+    const results = document.getElementById('results');
+    const progressBar = document.getElementById('progressBar');
+
+    if (!playlistUrl) {
+        alert('Ingresa una URL válida');
+        return;
+    }
+
+    stopFlag = false;
+    optimizedPlaylist = '';
+    results.innerHTML = '';
+    checkedChannels = 0;
+
+    document.getElementById('scanButton').style.display = 'none';
+    document.getElementById('stopButton').style.display = 'inline-block';
+    document.getElementById('downloadButton').style.display = 'none';
+
+    try {
+        const response = await fetch(playlistUrl);
+        const text = await response.text();
+        const lines = text.split('\n');
+
+        const channels = [];
+        for (let i = 0; i < lines.length; i++) {
+            if (lines[i].startsWith('#EXTINF')) {
+                channels.push({
+                    info: lines[i],
+                    url: lines[i + 1]?.trim()
+                });
+            }
+        }
+
+        totalChannels = channels.length;
+
+        for (const channel of channels) {
+            if (stopFlag) break;
+
+            const name = channel.info.split(',').pop();
+            const div = document.createElement('div');
+            div.className = 'channel-status';
+            div.textContent = `${name}: verificando...`;
+            results.appendChild(div);
+
+            const status = await checkChannel(channel.url);
+            checkedChannels++;
+
+            if (status === 'Disponible') {
+                div.textContent = `${name}: Disponible`;
+                div.classList.add('ok');
+                optimizedPlaylist += `${channel.info}\n${channel.url}\n`;
+                div.onclick = () => window.open(channel.url, '_blank');
+            } else if (status === 'No disponible') {
+                div.textContent = `${name}: No disponible`;
+                div.classList.add('fail');
+            } else {
+                div.textContent = `${name}: Error de conexión`;
+                div.classList.add('error');
+            }
+
+            progressBar.style.width =
+                `${(checkedChannels / totalChannels) * 100}%`;
+        }
+    } catch {
+        results.innerHTML = 'Error al cargar la lista IPTV';
+    } finally {
+        document.getElementById('scanButton').style.display = 'inline-block';
+        document.getElementById('stopButton').style.display = 'none';
+        document.getElementById('downloadButton').style.display =
+            optimizedPlaylist ? 'inline-block' : 'none';
+    }
+}
+
+function startScan() {
+    scanChannels();
+}
+
+function stopScan() {
+    stopFlag = true;
+}
+
+function downloadPlaylist() {
+    const blob = new Blob([optimizedPlaylist], { type: 'audio/x-mpegurl' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'playlist_optimizada.m3u';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
